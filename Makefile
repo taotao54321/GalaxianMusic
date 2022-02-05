@@ -8,7 +8,11 @@ OUT_DIR := build
 
 CFG := common.cfg
 
-TARGET := $(OUT_DIR)/music0.nes
+TARGET := $(OUT_DIR)/music0.nes \
+	  $(OUT_DIR)/music1.nes \
+	  $(OUT_DIR)/music2.nes \
+	  $(OUT_DIR)/music3.nes \
+	  $(OUT_DIR)/music4.nes
 
 all: $(TARGET)
 

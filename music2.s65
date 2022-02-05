@@ -1,0 +1,7 @@
+.include "common.s65"
+
+MUSIC_DATA:
+        .incbin "music2.bin"
+MUSIC_DATA_LEN = * - MUSIC_DATA
+
+MUSIC_TEMPO_MASK = $0F
