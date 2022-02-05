@@ -1,0 +1,12 @@
+VRAM_MIRROR_H = 0
+
+MAPPER = 0
+
+PRG_COUNT = 1
+CHR_COUNT = 0
+
+.segment "INES"
+        .byte   "NES", $1A
+        .byte   PRG_COUNT
+        .byte   CHR_COUNT
+        .byte   VRAM_MIRROR_H | (MAPPER << 4)

@@ -1,0 +1,217 @@
+;=====================================================================
+; ギャラクシアン (FC) 音楽プレイヤー
+;
+; インクルードする側で以下を定義すること:
+;
+;   * MUSIC_DATA
+;   * MUSIC_DATA_LEN
+;   * MUSIC_TEMPO_MASK
+;=====================================================================
+
+.setcpu "6502"
+
+.define NOT8(value) <~(value)
+
+PPU_CTRL   := $2000
+PPU_MASK   := $2001
+PPU_STATUS := $2002
+
+PPU_CTRL_NMI_ENABLE = 1 << 7
+
+APU_SQ1    := $4000
+APU_SQ2    := $4004
+APU_STATUS := $4015
+APU_FRAME  := $4017
+
+APU_SQ_DUTY_EIGHTH      = %00 << 6
+APU_SQ_DUTY_QUARTER     = %01 << 6
+APU_SQ_DUTY_HALF        = %10 << 6
+APU_SQ_DUTY_QUARTER_NEG = %11 << 6
+
+APU_SQ_SWEEP_DOWN = 0
+APU_SQ_SWEEP_UP   = 1 << 3
+
+APU_SQ_SWEEP_ENABLE = 1 << 7
+
+APU_STATUS_SQ1 = 1 << 0
+APU_STATUS_SQ2 = 1 << 1
+
+APU_FRAME_NOIRQ = 1 << 6
+APU_FRAME_STEP5 = 1 << 7
+
+;---------------------------------------------------------------------
+.segment "ZP" : zeropage
+;---------------------------------------------------------------------
+
+music_data_idx: .res 1
+music_note_byte: .res 1
+
+nmi_counter: .res 1
+
+;---------------------------------------------------------------------
+.segment "VECTORS"
+;---------------------------------------------------------------------
+
+        .addr   NMI
+        .addr   RESET
+        .addr   RESET   ; IRQ は使わない。万一発生したら RESET として扱う。
+
+;---------------------------------------------------------------------
+.segment "PRG"
+;---------------------------------------------------------------------
+
+;;; RESET ハンドラ。
+RESET:
+        sei
+        cld
+
+        ldx     #$FF
+        txs
+
+        ; VBLANK を 2 回待つ。
+@wait_vblank_1:
+        bit     PPU_STATUS
+        bpl     @wait_vblank_1
+@wait_vblank_2:
+        bit     PPU_STATUS
+        bpl     @wait_vblank_2
+
+        jsr     InitApu
+
+        lda     #0
+        sta     nmi_counter
+
+        ; 描画を無効化。
+        lda     #0
+        sta     PPU_MASK
+
+        ; NMI を有効化。
+        lda     #PPU_CTRL_NMI_ENABLE
+        sta     PPU_CTRL
+
+@mainloop:
+        jmp     @mainloop
+
+;;; APU を初期化する。
+InitApu:
+        lda     #APU_FRAME_NOIRQ | APU_FRAME_STEP5
+        sta     APU_FRAME
+
+        ; 音色設定。
+        lda     #15 | APU_SQ_DUTY_EIGHTH
+        sta     APU_SQ1
+        sta     APU_SQ2
+        lda     #NOT8 APU_SQ_SWEEP_ENABLE
+        sta     APU_SQ1+1
+        sta     APU_SQ2+1
+
+        lda     #APU_STATUS_SQ1 | APU_STATUS_SQ2
+        sta     APU_STATUS
+
+        rts
+
+;;; NMI ハンドラ。
+NMI:
+        pha
+        txa
+        pha
+        tya
+        pha
+
+        jsr     MusicTick
+
+        inc     nmi_counter
+
+        pla
+        tay
+        pla
+        tax
+        pla
+
+        rti
+
+;;; 演奏処理。
+MusicTick:
+        ; 曲が終了していれば何もしない。
+        ldx     music_data_idx
+        cpx     #MUSIC_DATA_LEN
+        bcs     @rts
+
+        ; (フレームカウンタ) & MUSIC_TEMPO_MASK が 0 になったら次の音符データを発声。
+        lda     nmi_counter
+        and     #MUSIC_TEMPO_MASK
+        bne     @rts
+
+        ; 次の音符データを読み取る。
+        lda     MUSIC_DATA,x
+        sta     music_note_byte
+        inc     music_data_idx
+
+        ; 矩形波1の音を得る (music_note_byte 下位4bit)。
+        and     #$0F
+        asl
+        tax
+
+        ; 矩形波1の音を発声。
+        lda     MUSIC_SQ1_PERIODS+1,x
+        sta     APU_SQ1+2
+        lda     MUSIC_SQ1_PERIODS,x
+        ora     #1 << 3
+        sta     APU_SQ1+3
+
+        ; 矩形波2の音を得る (music_note_byte 上位4bit)。
+        lda     music_note_byte
+        lsr
+        lsr
+        lsr
+        lsr
+        asl
+        tax
+
+        ; 矩形波2の音を発声。
+        lda     MUSIC_SQ2_PERIODS+1,x
+        sta     APU_SQ2+2
+        lda     MUSIC_SQ2_PERIODS,x
+        ora     #1 << 3
+        sta     APU_SQ2+3
+
+@rts:
+        rts
+
+;;; 矩形波1の音の周波数タイマー値。
+MUSIC_SQ1_PERIODS:
+        .dbyt   0       ; (休符)
+        .dbyt   1357    ; E2
+        .dbyt   1281    ; F2
+        .dbyt   1141    ; G2
+        .dbyt   1017    ; A2
+        .dbyt   906     ; B2
+        .dbyt   855     ; C3
+        .dbyt   762     ; D3
+        .dbyt   719     ; D#3
+        .dbyt   679     ; E3
+        .dbyt   641     ; F3
+        .dbyt   605     ; F#3
+        .dbyt   571     ; G3
+        .dbyt   539     ; G#3
+        .dbyt   508     ; A3
+        .dbyt   453     ; B3
+
+;;; 矩形波2の音の周波数タイマー値。
+MUSIC_SQ2_PERIODS:
+        .dbyt   0       ; (休符)
+        .dbyt   107     ; C6
+        .dbyt   113     ; B5
+        .dbyt   127     ; A5
+        .dbyt   143     ; G5
+        .dbyt   160     ; F5
+        .dbyt   170     ; E5
+        .dbyt   190     ; D5
+        .dbyt   214     ; C5
+        .dbyt   226     ; B4
+        .dbyt   254     ; A4
+        .dbyt   269     ; G#4
+        .dbyt   135     ; G#5
+        .dbyt   202     ; C#5
+        .dbyt   180     ; D#5
+        .dbyt   151     ; F#5
